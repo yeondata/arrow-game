@@ -206,6 +206,19 @@ function extendArrow(arrow, board, arrows) {
   return { id: arrow.id, path: extended, headDir: [head[0] - prev[0], head[1] - prev[1]] };
 }
 
+// 최종 규칙 4번째 항목: 꼬리 쪽에서도 뒤로(꼬리를 더 늘리는 방향으로) 더 자랄 수
+// 있으면 자란다. 경로를 뒤집어서 머리 쪽 확장과 같은 continueGrowing을 재사용하고,
+// 다 자란 뒤 다시 뒤집어 원래 방향으로 되돌린다. headDir(진짜 머리 쪽)는 그대로.
+function extendArrowBackward(arrow, board, arrows) {
+  const reversedPath = arrow.path.slice().reverse();
+  const last = reversedPath[reversedPath.length - 1];
+  const beforeLast = reversedPath[reversedPath.length - 2];
+  const backDir = [last[0] - beforeLast[0], last[1] - beforeLast[1]];
+  const extendedReversed = continueGrowing(reversedPath, backDir, board, arrows, arrow, false);
+  if (extendedReversed.length === arrow.path.length) return arrow; // 더 자라지 못함
+  return { id: arrow.id, path: extendedReversed.slice().reverse(), headDir: arrow.headDir };
+}
+
 function isAdjacent(a, b) {
   return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) === 1;
 }
@@ -339,6 +352,20 @@ function generateBoard() {
     mergedArrows[i] = grown;
     for (const [c, r] of addedCells) workingBoard[r][c] = grown.id;
     finalEmptyCount -= addedCells.length;
+  }
+
+  // 최종 규칙 4번째 항목: 꼬리 쪽에서도 뒤로 더 자랄 수 있으면 자란다.
+  for (let i = 0; i < mergedArrows.length; i++) {
+    const grown = extendArrowBackward(mergedArrows[i], workingBoard, mergedArrows);
+    if (grown === mergedArrows[i]) continue; // 더 자라지 못함
+    const addedCount = grown.path.length - mergedArrows[i].path.length;
+    const addedCells = grown.path.slice(0, addedCount);
+    const combined = mergedArrows.slice();
+    combined[i] = grown;
+    if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue; // 안전장치
+    mergedArrows[i] = grown;
+    for (const [c, r] of addedCells) workingBoard[r][c] = grown.id;
+    finalEmptyCount -= addedCount;
   }
 
   return { board: workingBoard, arrows: mergedArrows, emptyCount: finalEmptyCount };
