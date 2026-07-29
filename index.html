@@ -224,10 +224,10 @@ function hasChainViolationForStraight(list) {
   return false;
 }
 
-// 어떤 화살표의 머리가 다른 화살표의 꼬리와 맞닿아 있으면 하나의 화살표로 합친다.
-// 단, 병합하면 합쳐진 화살표는 뒤쪽(B) 화살표의 headDir를 물려받는데, 그 결과 다른
-// 화살표와 새로 마주보기 위반이 생긴다면 그 병합은 하지 않는다 — 병합은 순전히
-// 시각적 정리용이라 규칙 위반을 만들면서까지 할 이유가 없다.
+// 두 화살표를 하나로 합친다: (1) 한쪽 머리가 다른 쪽 꼬리와 맞닿아 있으면 그대로
+// 이어붙이고, (2) 꼬리끼리 맞닿아 있으면 둘 중 하나를 뒤집어 이어붙인다(어느 쪽을
+// 뒤집을지는 랜덤). 병합 결과가 다른 화살표와 새로 마주보기/체인 위반을 만들면
+// 그 병합은 하지 않는다 — 병합은 순전히 시각적 정리용이라 규칙 위반을 감수할 이유가 없다.
 function mergeConnectedArrows(arrows) {
   let list = arrows.map(a => ({ path: a.path, headDir: a.headDir, minId: a.id }));
   let mergedAny = true;
@@ -235,15 +235,28 @@ function mergeConnectedArrows(arrows) {
     mergedAny = false;
     for (let i = 0; i < list.length && !mergedAny; i++) {
       const head = list[i].path[list[i].path.length - 1];
+      const tailI = list[i].path[0];
       for (let j = 0; j < list.length; j++) {
         if (i === j) continue;
-        const tail = list[j].path[0];
-        if (!isAdjacent(head, tail)) continue;
-        const mergedEntry = {
-          path: list[i].path.concat(list[j].path),
-          headDir: list[j].headDir,
-          minId: Math.min(list[i].minId, list[j].minId),
-        };
+        const tailJ = list[j].path[0];
+        let mergedEntry = null;
+        if (isAdjacent(head, tailJ)) {
+          mergedEntry = {
+            path: list[i].path.concat(list[j].path),
+            headDir: list[j].headDir,
+            minId: Math.min(list[i].minId, list[j].minId),
+          };
+        } else if (isAdjacent(tailI, tailJ)) {
+          const flip = Math.random() < 0.5;
+          const front = flip ? list[i] : list[j];
+          const back = flip ? list[j] : list[i];
+          mergedEntry = {
+            path: back.path.slice().reverse().concat(front.path),
+            headDir: front.headDir,
+            minId: Math.min(list[i].minId, list[j].minId),
+          };
+        }
+        if (!mergedEntry) continue;
         const candidateList = list.filter((_, idx) => idx !== i && idx !== j).concat([mergedEntry]);
         if (hasFacingViolation(candidateList) || hasChainViolationForStraight(candidateList)) continue;
         list = candidateList;
