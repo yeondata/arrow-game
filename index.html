@@ -338,34 +338,40 @@ function generateBoard() {
 
   const mergedArrows = mergeConnectedArrows(arrows);
 
-  // 최종 규칙 3번째 항목: 빈 칸을 더 채우기 위해 각 화살표가 지금 머리에서
-  // 더 자랄 수 있는지 확인하고, 가능하면 더 키운다.
+  // 최종 규칙 3·4번째 항목: 머리 쪽/꼬리 쪽 모두 더 자랄 수 있으면 자란다.
+  // 한 화살표가 자라면 다른 화살표 입장에서 새로 "안좋음" 판정이 바뀔 수 있으므로
+  // (예: 마주보던 화살표가 더 자라 방향이 달라짐), 더 이상 아무도 못 자랄 때까지
+  // 머리/꼬리 확장을 반복한다 — simulateEscapable과 같은 방식.
   const workingBoard = rebuildBoard(mergedArrows);
   let finalEmptyCount = GRID * GRID - mergedArrows.reduce((s, a) => s + a.path.length, 0);
-  for (let i = 0; i < mergedArrows.length; i++) {
-    const grown = extendArrow(mergedArrows[i], workingBoard, mergedArrows);
-    if (grown === mergedArrows[i]) continue; // 더 자라지 못함
-    const addedCells = grown.path.slice(mergedArrows[i].path.length);
-    const combined = mergedArrows.slice();
-    combined[i] = grown;
-    if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue; // 안전장치
-    mergedArrows[i] = grown;
-    for (const [c, r] of addedCells) workingBoard[r][c] = grown.id;
-    finalEmptyCount -= addedCells.length;
-  }
-
-  // 최종 규칙 4번째 항목: 꼬리 쪽에서도 뒤로 더 자랄 수 있으면 자란다.
-  for (let i = 0; i < mergedArrows.length; i++) {
-    const grown = extendArrowBackward(mergedArrows[i], workingBoard, mergedArrows);
-    if (grown === mergedArrows[i]) continue; // 더 자라지 못함
-    const addedCount = grown.path.length - mergedArrows[i].path.length;
-    const addedCells = grown.path.slice(0, addedCount);
-    const combined = mergedArrows.slice();
-    combined[i] = grown;
-    if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue; // 안전장치
-    mergedArrows[i] = grown;
-    for (const [c, r] of addedCells) workingBoard[r][c] = grown.id;
-    finalEmptyCount -= addedCount;
+  let grewAny = true;
+  while (grewAny) {
+    grewAny = false;
+    for (let i = 0; i < mergedArrows.length; i++) {
+      const grown = extendArrow(mergedArrows[i], workingBoard, mergedArrows);
+      if (grown === mergedArrows[i]) continue; // 더 자라지 못함
+      const addedCells = grown.path.slice(mergedArrows[i].path.length);
+      const combined = mergedArrows.slice();
+      combined[i] = grown;
+      if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue; // 안전장치
+      mergedArrows[i] = grown;
+      for (const [c, r] of addedCells) workingBoard[r][c] = grown.id;
+      finalEmptyCount -= addedCells.length;
+      grewAny = true;
+    }
+    for (let i = 0; i < mergedArrows.length; i++) {
+      const grown = extendArrowBackward(mergedArrows[i], workingBoard, mergedArrows);
+      if (grown === mergedArrows[i]) continue; // 더 자라지 못함
+      const addedCount = grown.path.length - mergedArrows[i].path.length;
+      const addedCells = grown.path.slice(0, addedCount);
+      const combined = mergedArrows.slice();
+      combined[i] = grown;
+      if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue; // 안전장치
+      mergedArrows[i] = grown;
+      for (const [c, r] of addedCells) workingBoard[r][c] = grown.id;
+      finalEmptyCount -= addedCount;
+      grewAny = true;
+    }
   }
 
   return { board: workingBoard, arrows: mergedArrows, emptyCount: finalEmptyCount };
