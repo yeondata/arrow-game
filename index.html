@@ -95,6 +95,38 @@ function isBadDir(pos, d, path, board, arrows) {
   return false;
 }
 
+// 화살표의 머리에서 headDir 방향으로 보드 끝까지 갔을 때 cell을 지나가는지
+function reachesCell(arrow, cell) {
+  let cur = addDir(arrow.path[arrow.path.length - 1], arrow.headDir);
+  while (inBounds(cur)) {
+    if (cur[0] === cell[0] && cur[1] === cell[1]) return true;
+    cur = addDir(cur, arrow.headDir);
+  }
+  return false;
+}
+
+function reachesArrow(arrow, otherArrow) {
+  return otherArrow.path.some(c => reachesCell(arrow, c));
+}
+
+// 4.2-3 직진 선택 규칙(2번째 항목): X가 A로 직진하려 할 때, A를 바라보는 화살표 1,
+// 1을 바라보는 화살표 2, 2를 바라보는 화살표 3이 (방향 상관없이 머리 연장선이
+// 닿기만 하면) 전부 존재하는 체인이 있으면 직진 금지. "바라본다"는 마주보기(반대
+// 방향)와 무관하게, 그 화살표의 머리 연장선이 대상에 닿기만 하면 성립한다.
+function chainBlocksStraight(A, arrows) {
+  for (const a1 of arrows) {
+    if (!reachesCell(a1, A)) continue;
+    for (const a2 of arrows) {
+      if (a2 === a1 || !reachesArrow(a2, a1)) continue;
+      for (const a3 of arrows) {
+        if (a3 === a1 || a3 === a2) continue;
+        if (reachesArrow(a3, a2)) return true;
+      }
+    }
+  }
+  return false;
+}
+
 // 4.1~4.3: 화살표 하나 생성
 function growArrow(tail, board, arrows) {
   const path = [tail];
@@ -104,7 +136,10 @@ function growArrow(tail, board, arrows) {
     const last = path[path.length - 1];
     const [p1, p2] = perpendiculars(dir);
 
-    const straightCand = { d: dir, bad: isBadDir(last, dir, path, board, arrows) };
+    const straightCand = {
+      d: dir,
+      bad: isBadDir(last, dir, path, board, arrows) || chainBlocksStraight(addDir(last, dir), arrows),
+    };
     const curvePair = shuffle([
       { d: p1, bad: isBadDir(last, p1, path, board, arrows) },
       { d: p2, bad: isBadDir(last, p2, path, board, arrows) },
@@ -173,6 +208,22 @@ function hasFacingViolation(list) {
   return false;
 }
 
+// 목록(list) 안의 어떤 화살표든, 자신의 직선 구간이 4.2-3 3항(A-1-2-3 체인)을
+// 위반하는지 검사한다. 나중에 추가된 화살표가 예전 화살표의 직진 구간에 대해
+// "뒤늦게 체인을 완성시키는" 경우까지 잡아내기 위해, 매번 목록 전체를 재검사한다.
+function hasChainViolationForStraight(list) {
+  for (const a of list) {
+    for (let i = 1; i < a.path.length - 1; i++) {
+      const prevD = [a.path[i][0] - a.path[i - 1][0], a.path[i][1] - a.path[i - 1][1]];
+      const nextD = [a.path[i + 1][0] - a.path[i][0], a.path[i + 1][1] - a.path[i][1]];
+      if (prevD[0] !== nextD[0] || prevD[1] !== nextD[1]) continue; // 직진 구간만 대상
+      const others = list.filter(x => x !== a);
+      if (chainBlocksStraight(a.path[i + 1], others)) return true;
+    }
+  }
+  return false;
+}
+
 // 어떤 화살표의 머리가 다른 화살표의 꼬리와 맞닿아 있으면 하나의 화살표로 합친다.
 // 단, 병합하면 합쳐진 화살표는 뒤쪽(B) 화살표의 headDir를 물려받는데, 그 결과 다른
 // 화살표와 새로 마주보기 위반이 생긴다면 그 병합은 하지 않는다 — 병합은 순전히
@@ -194,7 +245,7 @@ function mergeConnectedArrows(arrows) {
           minId: Math.min(list[i].minId, list[j].minId),
         };
         const candidateList = list.filter((_, idx) => idx !== i && idx !== j).concat([mergedEntry]);
-        if (hasFacingViolation(candidateList)) continue;
+        if (hasFacingViolation(candidateList) || hasChainViolationForStraight(candidateList)) continue;
         list = candidateList;
         mergedAny = true;
         break;
@@ -232,7 +283,8 @@ function generateBoard() {
     const head = path[path.length - 1];
     const prev = path[path.length - 2];
     const candidate = { path, headDir: [head[0] - prev[0], head[1] - prev[1]] };
-    if (hasFacingViolation(arrows.concat([candidate]))) continue;
+    const combined = arrows.concat([candidate]);
+    if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue;
 
     const id = nextId++;
     arrows.push({ id, ...candidate });
