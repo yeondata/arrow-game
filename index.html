@@ -239,6 +239,31 @@ function hasFacingViolation(list) {
   return false;
 }
 
+// 목록(list) 안의 어떤 화살표든, 자기 경로의 커브 지점에서 그 방향 연장선(보드 끝까지)에
+// 자기 자신의 다른 칸이 있는지 검사한다(4.2-3 커브 규칙 1항). 커브 당시엔 그 뒤로 아직
+// 그려지지 않은 칸이었지만, 이후 병합/확장으로 같은 화살표에 새 칸이 붙으면서 뒤늦게
+// 그 옛 커브의 연장선 위에 놓이는 경우까지 잡기 위한 것 — 결정 시점엔 알 수 없었던 조합.
+function hasSelfCurveViolation(list) {
+  for (const a of list) {
+    const selfSet = new Set(a.path.map(p => p[0] + ',' + p[1]));
+    for (let i = 1; i < a.path.length - 1; i++) {
+      const prevD = [a.path[i][0] - a.path[i - 1][0], a.path[i][1] - a.path[i - 1][1]];
+      const nextD = [a.path[i + 1][0] - a.path[i][0], a.path[i + 1][1] - a.path[i][1]];
+      if (prevD[0] === nextD[0] && prevD[1] === nextD[1]) continue; // 커브 지점만 대상
+      let cur = addDir(a.path[i], nextD);
+      let step = 1;
+      while (inBounds(cur)) {
+        const expected = a.path[i + step];
+        const isNaturalContinuation = expected && expected[0] === cur[0] && expected[1] === cur[1];
+        if (!isNaturalContinuation && selfSet.has(cur[0] + ',' + cur[1])) return true;
+        cur = addDir(cur, nextD);
+        step++;
+      }
+    }
+  }
+  return false;
+}
+
 // 목록(list) 안의 어떤 화살표든, 자신의 직선 구간이 4.2-3 3항(A-1-2-3 체인)을
 // 위반하는지 검사한다. 나중에 추가된 화살표가 예전 화살표의 직진 구간에 대해
 // "뒤늦게 체인을 완성시키는" 경우까지 잡아내기 위해, 매번 목록 전체를 재검사한다.
@@ -289,7 +314,7 @@ function mergeConnectedArrows(arrows) {
         }
         if (!mergedEntry) continue;
         const candidateList = list.filter((_, idx) => idx !== i && idx !== j).concat([mergedEntry]);
-        if (hasFacingViolation(candidateList) || hasChainViolationForStraight(candidateList)) continue;
+        if (hasFacingViolation(candidateList) || hasChainViolationForStraight(candidateList) || hasSelfCurveViolation(candidateList)) continue;
         list = candidateList;
         mergedAny = true;
         break;
@@ -328,7 +353,7 @@ function generateBoard() {
     const prev = path[path.length - 2];
     const candidate = { path, headDir: [head[0] - prev[0], head[1] - prev[1]] };
     const combined = arrows.concat([candidate]);
-    if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue;
+    if (hasFacingViolation(combined) || hasChainViolationForStraight(combined) || hasSelfCurveViolation(combined)) continue;
 
     const id = nextId++;
     arrows.push({ id, ...candidate });
@@ -353,7 +378,7 @@ function generateBoard() {
       const addedCells = grown.path.slice(mergedArrows[i].path.length);
       const combined = mergedArrows.slice();
       combined[i] = grown;
-      if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue; // 안전장치
+      if (hasFacingViolation(combined) || hasChainViolationForStraight(combined) || hasSelfCurveViolation(combined)) continue; // 안전장치
       mergedArrows[i] = grown;
       for (const [c, r] of addedCells) workingBoard[r][c] = grown.id;
       finalEmptyCount -= addedCells.length;
@@ -366,7 +391,7 @@ function generateBoard() {
       const addedCells = grown.path.slice(0, addedCount);
       const combined = mergedArrows.slice();
       combined[i] = grown;
-      if (hasFacingViolation(combined) || hasChainViolationForStraight(combined)) continue; // 안전장치
+      if (hasFacingViolation(combined) || hasChainViolationForStraight(combined) || hasSelfCurveViolation(combined)) continue; // 안전장치
       mergedArrows[i] = grown;
       for (const [c, r] of addedCells) workingBoard[r][c] = grown.id;
       finalEmptyCount -= addedCount;
