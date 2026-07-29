@@ -80,20 +80,16 @@ function isValidCell(cell, path, board) {
 function isOpposite(a, b) { return a[0] === -b[0] && a[1] === -b[1]; }
 
 // 4.2-3의 1~3번 규칙: 방향 d의 연장선(보드 끝까지) 위 어디든 자기 몸통이 있거나,
-// 나를 향한(headDir가 정반대인) 다른 화살표의 "머리"가 있으면 그 방향은 "안좋음".
-// 다른 화살표의 몸통이 중간에 가리고 있어도 멈추지 않고 보드 끝까지 계속 확인한다.
-// (다른 화살표의 몸통 중간을 지나는 것 자체는 문제 없음 — 그 화살표의 머리가 나를
-// 마주보고 있는지만 본다)
+// 나를 향한(headDir가 정반대인) 다른 화살표의 칸이 있으면 그 방향은 "안좋음".
+// 그 칸이 그 화살표의 머리인지 몸통인지는 상관없다 — 화살표 전체의 headDir가
+// 나와 정반대면(=나를 마주보고 있으면) 바로 위반이다. 다른 화살표의 몸통이 중간에
+// 가리고 있어도(마주보지 않는 화살표라면) 멈추지 않고 보드 끝까지 계속 확인한다.
 function isBadDir(pos, d, path, board, arrows) {
   let cur = addDir(pos, d);
   while (inBounds(cur)) {
     if (path.some(p => p[0] === cur[0] && p[1] === cur[1])) return true;
     const occ = board[cur[1]][cur[0]];
-    if (occ !== null) {
-      const other = arrows[occ];
-      const otherHead = other.path[other.path.length - 1];
-      if (cur[0] === otherHead[0] && cur[1] === otherHead[1] && isOpposite(other.headDir, d)) return true;
-    }
+    if (occ !== null && isOpposite(arrows[occ].headDir, d)) return true;
     cur = addDir(cur, d);
   }
   return false;
@@ -161,9 +157,28 @@ function isAdjacent(a, b) {
   return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) === 1;
 }
 
-// 어떤 화살표의 머리가 다른 화살표의 꼬리와 맞닿아 있으면 하나의 화살표로 합친다
+// 후보 목록(list: {path, headDir}[]) 안에 머리끼리 마주보는 화살표 쌍이 있는지 검사
+function hasFacingViolation(list) {
+  const dirBoard = Array.from({ length: GRID }, () => Array(GRID).fill(null));
+  for (const a of list) for (const [c, r] of a.path) dirBoard[r][c] = a.headDir;
+  for (const a of list) {
+    const head = a.path[a.path.length - 1];
+    let cur = addDir(head, a.headDir);
+    while (inBounds(cur)) {
+      const otherDir = dirBoard[cur[1]][cur[0]];
+      if (otherDir !== null && isOpposite(otherDir, a.headDir)) return true;
+      cur = addDir(cur, a.headDir);
+    }
+  }
+  return false;
+}
+
+// 어떤 화살표의 머리가 다른 화살표의 꼬리와 맞닿아 있으면 하나의 화살표로 합친다.
+// 단, 병합하면 합쳐진 화살표는 뒤쪽(B) 화살표의 headDir를 물려받는데, 그 결과 다른
+// 화살표와 새로 마주보기 위반이 생긴다면 그 병합은 하지 않는다 — 병합은 순전히
+// 시각적 정리용이라 규칙 위반을 만들면서까지 할 이유가 없다.
 function mergeConnectedArrows(arrows) {
-  let list = arrows.map(a => ({ path: a.path, minId: a.id }));
+  let list = arrows.map(a => ({ path: a.path, headDir: a.headDir, minId: a.id }));
   let mergedAny = true;
   while (mergedAny) {
     mergedAny = false;
@@ -172,26 +187,23 @@ function mergeConnectedArrows(arrows) {
       for (let j = 0; j < list.length; j++) {
         if (i === j) continue;
         const tail = list[j].path[0];
-        if (isAdjacent(head, tail)) {
-          const merged = {
-            path: list[i].path.concat(list[j].path),
-            minId: Math.min(list[i].minId, list[j].minId),
-          };
-          list = list.filter((_, idx) => idx !== i && idx !== j);
-          list.push(merged);
-          mergedAny = true;
-          break;
-        }
+        if (!isAdjacent(head, tail)) continue;
+        const mergedEntry = {
+          path: list[i].path.concat(list[j].path),
+          headDir: list[j].headDir,
+          minId: Math.min(list[i].minId, list[j].minId),
+        };
+        const candidateList = list.filter((_, idx) => idx !== i && idx !== j).concat([mergedEntry]);
+        if (hasFacingViolation(candidateList)) continue;
+        list = candidateList;
+        mergedAny = true;
+        break;
       }
     }
   }
   return list
     .sort((a, b) => a.minId - b.minId)
-    .map((a, idx) => {
-      const head = a.path[a.path.length - 1];
-      const prev = a.path[a.path.length - 2];
-      return { id: idx, path: a.path, headDir: [head[0] - prev[0], head[1] - prev[1]] };
-    });
+    .map((a, idx) => ({ id: idx, path: a.path, headDir: a.headDir }));
 }
 
 // 5장: 보드 전체 생성 (5-4, 5-5 솔버 검증은 생략)
@@ -214,11 +226,17 @@ function generateBoard() {
     const path = growArrow(tail, board, arrows);
     if (path.length < PARAMS.minLen) continue; // 짧은 화살표 폐기, 재시도
 
-    const id = nextId++;
-    for (const [c, r] of path) board[r][c] = id;
+    // 이 화살표의 꼬리는 아무 체크 없이 무작위로 골랐으므로, 이미 존재하는 다른
+    // 화살표의 머리가 하필 이 새 화살표의 칸(꼬리 포함)을 정면으로 마주보게 되는
+    // 경우가 생길 수 있다 — 성장 중엔 알 수 없었던 조합이므로 사후 검증 후 폐기한다.
     const head = path[path.length - 1];
     const prev = path[path.length - 2];
-    arrows.push({ id, path, headDir: [head[0] - prev[0], head[1] - prev[1]] });
+    const candidate = { path, headDir: [head[0] - prev[0], head[1] - prev[1]] };
+    if (hasFacingViolation(arrows.concat([candidate]))) continue;
+
+    const id = nextId++;
+    arrows.push({ id, ...candidate });
+    for (const [c, r] of path) board[r][c] = id;
     emptyCount -= path.length;
   }
 
